@@ -5,11 +5,11 @@
 .DESCRIPTION
     This script handles the transfer of large video files (.mkv, .mp4)
     from a pre-configured rclone remote for Google Drive ('gdrive') to a series of
-    MEGA.nz accounts. This final version uses the correct login verification string.
+    MEGA.nz accounts. This is the definitive, corrected version.
 
 .NOTES
     Author: Hiei
-    Last Modified: 2025-07-31 (Final Version)
+    Last Modified: 2025-07-31 (Definitive Version)
     Requires: rclone, mega-cmd (and to be in the system's PATH).
 #>
 
@@ -50,8 +50,10 @@ Get-Content $processedLog | ForEach-Object { [void]$processedIds.Add($_) }
 
 Write-Host "Fetching file list from Google Drive. This may take a moment..."
 try {
+    # Corrected: The format string "sip" (Size, ID, Path) now
+    # correctly matches the three headers provided to ConvertFrom-Csv.
     $csvHeader = "Size", "ID", "Path"
-    $gdriveFiles = rclone lsf $gdriveRemote --include "*.{mkv,mp4}" --recursive --format "psip" --separator "," | ConvertFrom-Csv -Header $csvHeader -ErrorAction Stop
+    $gdriveFiles = rclone lsf $gdriveRemote --include "*.{mkv,mp4}" --recursive --format "sip" --separator "," | ConvertFrom-Csv -Header $csvHeader -ErrorAction Stop
 }
 catch {
     Write-Error "Failed to get file list from rclone. Is '$gdriveRemote' configured correctly?"
@@ -69,10 +71,9 @@ foreach ($account in $accounts) {
     Write-Host "Logging in..."
     mega-login $account $password
 
-    # A brief pause for the service to initialize.
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 2
     
-    Write-Host "Successfully logged in as $account."
+    Write-Host "Proceeding with file transfer for $account."
 
     $currentAccountSize = 0
     $accountLogFile = Join-Path $accountLogsDir "$($account).log"
@@ -88,16 +89,26 @@ foreach ($account in $accounts) {
             Write-Host "Account storage limit reached. Moving to the next account."
             break
         }
-
+        
         $fileName = [System.IO.Path]::GetFileName($file.Path)
+        $fileName = $fileName.Replace(':', '-')
+        
         $localFilePath = Join-Path $downloadDir $fileName
-        $remotePath = "$gdriveRemote`:$($file.Path)"
+        
+        # Corrected: The remote path is constructed by joining the remote name
+        # (which already has a colon) and the file path. No extra colon.
+        $remotePath = "$gdriveRemote$($file.Path)"
 
         Write-Host "Downloading '$fileName' ($([math]::Round($fileSize / 1MB, 2)) MB)..."
         rclone copyto $remotePath $localFilePath --progress
 
         Write-Host "Uploading '$fileName' to $account..."
         mega-put $localFilePath
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Upload of '$fileName' failed. Halting script to prevent data loss."
+            exit 1
+        }
 
         Write-Host "Cleaning up local file..."
         Remove-Item $localFilePath
