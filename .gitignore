@@ -1,0 +1,6 @@
+.env
+temp_downloads/
+scripts/*.txt
+.DS_Store
+*.log
+*.json
