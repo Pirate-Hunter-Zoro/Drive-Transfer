@@ -71,9 +71,6 @@ foreach ($account in $accounts) {
 
     # A brief pause for the service to initialize.
     Start-Sleep -Seconds 3
-
-    # Check login status using the correct output string.
-    $whoamiOutput = mega-whoami
     
     Write-Host "Successfully logged in as $account."
 
