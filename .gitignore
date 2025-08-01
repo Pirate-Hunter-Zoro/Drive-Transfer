@@ -1,6 +1,7 @@
 .env
-temp_downloads/
+downloads/
 scripts/*.txt
 .DS_Store
 *.log
 *.json
+logs/
