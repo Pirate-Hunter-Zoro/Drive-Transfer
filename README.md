@@ -2,45 +2,43 @@
 
 A two-stage technique designed to bring order to a chaotic collection of media files. It first purifies their names with demonic power and then dispatches them to their final destinations.
 
-The primary assault relies on the superior intellect of the `forge_gemini_batch_map.py` script, which interrogates targets in controlled waves to determine their true names. It is a resumable process; if interrupted, it can pick up where it left off without re-processing completed work.
+This project is intended to be run on a machine where you have the freedom to act—one where both **`rclone`** and the **`MEGAcmd`** command-line tools are properly installed and their locations have been added to the system's `PATH` environment variable. All previous, pathetic attempts to work around system limitations (such as the Selenium puppet technique) have been abandoned as they are no longer necessary.
 
-Should the initial plan contain flaws (such as duplicate destinations), the ritual will pause and demand human guidance. It isolates the flawed entries and uses the `refine_with_notes.py` script to perform a surgical strike, perfecting the plan before execution.
+The ritual is resumable; if interrupted, it can pick up where it left off without re-processing completed work.
 
----
+-----
 
 ## Components of the Arsenal
 
 Your forces are comprised of the following:
 
 * **Master Scripts:**
-  * `master_rename.sh`: The primary invocation script. It orchestrates the entire renaming assault, from cataloging to final execution.
-  * `master_transfer.sh`: The secondary script. Unleashed after the renaming is complete to transfer the perfected files.
+  * `master_rename.sh`: The primary invocation script. It orchestrates the entire renaming assault, from cataloging to final execution, using `rclone` and Gemini.
+  * `master_transfer.sh`: The secondary script. Unleashed after the renaming is complete to transfer the perfected files from Google Drive to multiple MEGA accounts.
 * **Core Weaponry:**
-  * `scripts/forge_gemini_batch_map.py`: The heart of the technique. It wields the power of Gemini to correct the flawed filenames.
-  * `scripts/refine_with_notes.py`: The precision strike. It uses a `notes.txt` file to correct specific flaws isolated in `repeats.txt`.
-  * `execute_rename.sh`: The executioner. It carries out the final sentence passed down by the master plan.
+  * `rename/forge_gemini_batch_map.py`: The heart of the renaming technique. It wields the power of Gemini to correct flawed filenames.
+  * `rename/refine_with_notes.py`: The precision strike. It uses a `notes.txt` file to correct specific flaws found in the initial battle plan.
+  * `execute_rename.sh`: The executioner. It carries out the final renames within Google Drive.
 * **Supporting Files & Scrolls:**
   * `.env`: A scroll where you must inscribe your secret key (`GOOGLE_API_KEY`).
+  * `accounts.txt`: A **critical** and secret scroll where you list your MEGA account credentials, one per line, in the format `email:password`. **This file must be in your `.gitignore`**.
   * `requirements.txt`: A list of incantations (`pip`) to summon the necessary Python spirits.
-  * `credentials.json` & `token.json`: Seals of power required for your `rclone` configuration to command Google Drive.
-  * `scripts/`: The directory where the battle takes place. It contains the lists of targets (`file_list.txt`), the battle plan (`renamemap.txt`), logs of failures, records of transfers, and **`repeats.txt`**, a temporary file containing only the flawed mappings that require your attention.
+  * `rename/`: The directory where the battle takes place. It contains the lists of targets, the battle plan, logs of failures, and records of transfers.
 
----
+-----
 
 ## Preparation for the Ritual
 
-Before you begin, you must prepare the battlefield. Do not fail in these simple tasks.
+Before you begin, you must prepare the battlefield. Failure is not an option.
 
-1. **Configure `rclone`:** This technique assumes you have already established a pact with `rclone` and have configured your `gdrive:` and `mega...:` remotes.
-2. **Inscribe the Secret Key:** Create the `.env` file. It must contain your Google API key. Execute this command precisely:
+1. **Install the Warriors:** Ensure both `rclone` and `MEGAcmd` are fully installed on your system.
+2. **Grant Them Sight (PATH):** You **must** add the installation directories for both `rclone` and `MEGAcmd` to your system's `PATH` environment variable. The ritual will fail if your terminal cannot find these commands from any location.
+3. **Configure `rclone`:** You must have a configured `rclone` remote pointing to your Google Drive, and it must be named `gdrive`.
+4. **Inscribe the Secret Keys:**
+      * Create the `.env` file with your Google API key: `echo "GOOGLE_API_KEY='YOUR_SECRET_KEY_HERE'" > .env`
+      * Create the `accounts.txt` file and list your MEGA accounts, one per line: `your-email@example.com:your_password`
 
-    ```sh
-    echo "GOOGLE_API_KEY='YOUR_SECRET_KEY_HERE'" > .env
-    ```
-
-3. **Set the Weapon's Path:** The `RCLONE_CMD` variable at the top of both `master_rename.sh` and `master_transfer.sh` must point to your `rclone` executable. Your pathetic human systems are inconsistent; you must adjust this path yourself.
-
----
+-----
 
 ## Executing the Assault
 
@@ -48,26 +46,17 @@ The technique is unleashed in two distinct phases.
 
 ### Phase I: The Renaming
 
-This is the main assault. All other steps are merely a prelude to this.
+This phase purifies the names of your files within Google Drive.
 
 1. **Invoke the Master Script:**
 
     ```sh
-    sh master_rename.sh
+    bash master_rename.sh
     ```
 
-2. **Observe the Ritual:** The script will automatically:
-    * Prepare its spiritual energy by setting up the Conda environment.
-    * **Catalog targets**, creating `scripts/file_list.txt` (This step is skipped if the file already exists).
-    * **Interrogate targets** using Gemini, creating `scripts/renamemap.txt` (Skipped if the file exists).
-    * **Purify the plan** into `scripts/renamemap_purified.txt` (Skipped if the file exists).
-3. **The Refinement Loop:** The script will then scrutinize the plan with the Jagan Eye.
-    * If no flaws are found, it will proceed.
-    * If duplicate destinations are detected, the ritual will **pause** and **isolate** all flawed mappings into a new file: **`scripts/repeats.txt`**.
-    * You must then create a **`scripts/notes.txt`** file. Use the contents of `repeats.txt` as your guide to write instructions for correcting the flawed entries.
-    * Once you save the notes and press Enter, the `refine_with_notes.py` script will perform a **surgical strike**: correcting *only* the flawed lines and merging them back into the master plan.
-    * This loop repeats until the plan is flawless.
-4. **Unleash the Dragon:** You will be prompted for final confirmation. This is the point of no return. Once you proceed, `execute_rename.sh` will carry out the renames.
+2. **Observe the Ritual:** The script will automatically catalog your files, use Gemini to create a renaming plan, and then enter the **Refinement Loop**.
+3. **The Refinement Loop:** If the Jagan Eye detects any flaws (duplicate final names), the ritual will pause. It will isolate the flawed entries into `rename/repeats.txt`. You must then create a `rename/notes.txt` file to provide corrections. This loop will repeat until the plan is perfect.
+4. **Unleash the Dragon:** Upon your final confirmation, the script will execute the renames directly on your Google Drive.
 
 ### Phase II: The Transfer
 
@@ -76,7 +65,7 @@ After the targets have been perfected, their transfer can begin.
 1. **Invoke the Transfer Script:**
 
     ```sh
-    sh master_transfer.sh
+    bash master_transfer.sh
     ```
 
-2. **The Great Dispersal:** The script will copy the renamed files from `gdrive:` to your series of `mega...:` remotes, keeping a detailed log of which file went to which destination in `scripts/transfer_log.txt`.
+2. **The Great Dispersal:** The script will read your `accounts.txt` file and begin a relentless, file-by-file assault. It will download each file from Google Drive to a temporary local folder, upload it to the next MEGA account in the sequence, and then purge the local copy before proceeding to the next target. All transfers are logged for your records.
