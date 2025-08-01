@@ -91,7 +91,6 @@ foreach ($account in $accounts) {
         }
         
         $fileName = [System.IO.Path]::GetFileName($file.Path)
-        $fileName = $fileName.Replace(':', '-')
         
         $localFilePath = Join-Path $downloadDir $fileName
         
