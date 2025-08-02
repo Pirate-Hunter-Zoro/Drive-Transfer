@@ -9,7 +9,7 @@
 
 .NOTES
     Author: Hiei
-    Last Modified: 2025-07-31 (Definitive Version)
+    Last Modified: 2025-08-01 (Final Corrected Version)
     Requires: rclone, mega-cmd (and to be in the system's PATH).
 #>
 
@@ -50,8 +50,6 @@ Get-Content $processedLog | ForEach-Object { [void]$processedIds.Add($_) }
 
 Write-Host "Fetching file list from Google Drive. This may take a moment..."
 try {
-    # Corrected: The format string "sip" (Size, ID, Path) now
-    # correctly matches the three headers provided to ConvertFrom-Csv.
     $csvHeader = "Size", "ID", "Path"
     $gdriveFiles = rclone lsf $gdriveRemote --include "*.{mkv,mp4}" --recursive --format "sip" --separator "," | ConvertFrom-Csv -Header $csvHeader -ErrorAction Stop
 }
@@ -82,6 +80,11 @@ foreach ($account in $accounts) {
     }
 
     foreach ($file in $gdriveFiles) {
+        if (-not $file -or [string]::IsNullOrWhiteSpace($file.Path)) {
+            Write-Warning "Skipping a malformed or empty file entry from rclone output."
+            continue
+        }
+
         if ($processedIds.Contains($file.ID)) { continue }
 
         $fileSize = [long]$file.Size
@@ -92,20 +95,34 @@ foreach ($account in $accounts) {
         
         $fileName = [System.IO.Path]::GetFileName($file.Path)
         
+        if ([string]::IsNullOrWhiteSpace($fileName)) {
+            Write-Warning "Could not determine filename for path: $($file.Path). Skipping."
+            continue
+        }
+
         $localFilePath = Join-Path $downloadDir $fileName
-        
-        # Corrected: The remote path is constructed by joining the remote name
-        # (which already has a colon) and the file path. No extra colon.
         $remotePath = "$gdriveRemote$($file.Path)"
 
         Write-Host "Downloading '$fileName' ($([math]::Round($fileSize / 1MB, 2)) MB)..."
-        rclone copyto $remotePath $localFilePath --progress
+        
+        # --- CORRECTION ---
+        # Replaced the unknown flag with one that limits streams to 1, effectively single-threading the download.
+        rclone copyto $remotePath $localFilePath --progress --multi-thread-streams 1
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Download of '$fileName' failed. Skipping to next file."
+            continue
+        }
+        # --- END CORRECTION ---
 
         Write-Host "Uploading '$fileName' to $account..."
         mega-put $localFilePath
 
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Upload of '$fileName' failed. Halting script to prevent data loss."
+            if (Test-Path $localFilePath) {
+                Remove-Item $localFilePath
+            }
             exit 1
         }
 
