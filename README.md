@@ -18,6 +18,8 @@ The process is a multi-stage assault. Each script is a distinct technique, to be
 
 * **`remove_colon.py`**: A simple, but necessary, utility. This script scours your Google Drive for video files with colons in their names—a character that can cause trouble—and replaces them. It includes a `DRY_RUN` parameter, a pointless feature for the weak-willed who fear commitment.
 
+* **`scan_accounts.ps1`**: A tool for interrogation. This script performs a sweeping audit of your MEGA accounts. It logs into each one sequentially, hunts for files matching a specific name, and records all findings in `scripts/found_files_log.txt`. Use it to confirm the location of key assets or to find stragglers after a major operation. It requires a single password in `scripts/scan_account_password.txt` for the entire account block.
+
 ## Prerequisites
 
 Don't even think about starting without the proper preparations.
