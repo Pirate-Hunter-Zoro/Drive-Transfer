@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 # Corrected paths to the plan and a new failure log
 INPUT_FILE="scripts/renamemap_purified.txt"
 FAILURE_LOG="scripts/execution_failures.txt"
-RCLONE_CMD="$HOME/rclone-v1.70.3-osx-arm64/rclone" # Make sure this path is correct
+RCLONE_CMD="rclone" # Make sure this path is correct - it will be on windows if you edit the path environmental variable
 
 # Clear any previous failure log
 >"$FAILURE_LOG"
