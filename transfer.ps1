@@ -5,11 +5,11 @@
 .DESCRIPTION
     This script handles the transfer of large video files (.mkv, .mp4)
     from a pre-configured rclone remote for Google Drive ('gdrive') to a series of
-    MEGA.nz accounts. This is the definitive, corrected version.
+    MEGA.nz accounts. This version includes resume capabilities.
 
 .NOTES
     Author: Hiei
-    Last Modified: 2025-08-01 (Final Corrected Version)
+    Last Modified: 2025-08-02 (Resume Logic Added)
     Requires: rclone, mega-cmd (and to be in the system's PATH).
 #>
 
@@ -60,7 +60,50 @@ catch {
 
 Write-Host "Found $($gdriveFiles.Count) total video files. Beginning transfer process..."
 
-foreach ($account in $accounts) {
+# --- RESUME LOGIC ---
+$startIndex = 0
+$resumeAccountName = $null
+$resumeAccountInitialSize = 0
+
+Write-Host "Checking for previous sessions to resume..."
+$lastLog = Get-ChildItem -Path $accountLogsDir -Filter "*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+if ($lastLog) {
+    $resumeAccountName = $lastLog.BaseName
+    $foundIndex = [array]::IndexOf($accounts, $resumeAccountName)
+
+    if ($foundIndex -ge 0) {
+        $startIndex = $foundIndex
+        Write-Host "Found previous session. Resuming at account: $resumeAccountName"
+
+        # Pre-calculate the size of files already in the resume account to properly track space.
+        $accountLogFileForResume = Join-Path $accountLogsDir $lastLog.Name
+        if (Test-Path $accountLogFileForResume) {
+            # Create a quick lookup map for file sizes to avoid slow nested loops.
+            $fileSizeMap = @{}
+            $gdriveFiles | ForEach-Object { $fileSizeMap[$_.Path] = [long]$_.Size }
+
+            # Read the log, ignoring the header line, and sum the sizes of already transferred files.
+            Get-Content $accountLogFileForResume | Where-Object { -not $_.StartsWith("---") } | ForEach-Object {
+                if ($fileSizeMap.ContainsKey($_)) {
+                    $resumeAccountInitialSize += $fileSizeMap[$_]
+                }
+            }
+            $usedSpaceGB = [math]::Round($resumeAccountInitialSize / 1GB, 2)
+            Write-Host "Resume account '$resumeAccountName' already contains $usedSpaceGB GB of data."
+        }
+    }
+    else {
+        Write-Warning "Log file for '$resumeAccountName' found, but this account is not in accounts.txt. Starting from the beginning."
+    }
+}
+else {
+    Write-Host "No previous session logs found. Starting fresh."
+}
+# --- END RESUME LOGIC ---
+
+for ($i = $startIndex; $i -lt $accounts.Count; $i++) {
+    $account = $accounts[$i]
     Write-Host "`n--- Processing account: $account ---"
 
     Write-Host "Ensuring previous session is terminated..."
@@ -73,7 +116,14 @@ foreach ($account in $accounts) {
     
     Write-Host "Proceeding with file transfer for $account."
 
+    # If this is the account we're resuming, start with its previously calculated size.
     $currentAccountSize = 0
+    if ($account -eq $resumeAccountName) {
+        $currentAccountSize = $resumeAccountInitialSize
+        # Clear the resume name so this logic only runs for the first account in the session.
+        $resumeAccountName = $null 
+    }
+    
     $accountLogFile = Join-Path $accountLogsDir "$($account).log"
     if (-not (Test-Path $accountLogFile)) {
         Add-Content -Path $accountLogFile -Value "--- Log for $($account) on $(Get-Date) ---"
