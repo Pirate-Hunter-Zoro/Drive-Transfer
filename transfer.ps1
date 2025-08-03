@@ -5,11 +5,11 @@
 .DESCRIPTION
     This script handles the transfer of large video files (.mkv, .mp4)
     from a pre-configured rclone remote for Google Drive ('gdrive') to a series of
-    MEGA.nz accounts. This version includes resume capabilities.
+    MEGA.nz accounts. This version uses direct account storage checking and a unified processed file log.
 
 .NOTES
     Author: Hiei
-    Last Modified: 2025-08-02 (Resume Logic Added)
+    Last Modified: 2025-08-03 (Removed resume logic per user request)
     Requires: rclone, mega-cmd (and to be in the system's PATH).
 #>
 
@@ -29,14 +29,48 @@ $maxSizeBytes = 19.5 * 1GB
 # --- SCRIPT ---
 $accountsFile = Join-Path $scriptsDir "accounts.txt"
 $passwordFile = Join-Path $scriptsDir "passwords.txt"
-$processedLog = Join-Path $logsDir "processed_files.log"
 $accountLogsDir = Join-Path $logsDir "account_contents"
 
-Write-Host "Preparing directories and logs..."
+# --- HELPER FUNCTION ---
+# Interrogates mega-cmd for the current account's storage usage and returns it in bytes.
+function Get-MegaUsageBytes {
+    # The 'mega-df -h' command provides human-readable output that is parsed here.
+    $output = mega-df -h 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to get MEGA storage info. Output: $output"
+        return $null
+    }
+
+    # Regex to capture the used storage value and its unit (e.g., "1.16 GB").
+    # It looks for a line containing "used" and captures the preceding number and unit.
+    $match = $output | Select-String -Pattern '(\d+(?:\.\d+)?)\s*(GB|MB|KB|B)\s+used'
+    if ($match) {
+        $value = [double]$match.Matches.Groups[1].Value
+        $unit = $match.Matches.Groups[2].Value.ToUpper()
+        
+        switch ($unit) {
+            "GB" { return [long]($value * 1GB) }
+            "MB" { return [long]($value * 1MB) }
+            "KB" { return [long]($value * 1KB) }
+            "B"  { return [long]($value) }
+            default { 
+                Write-Warning "Unknown unit '$unit' in mega-df output. Assuming 0 bytes."
+                return 0 
+            }
+        }
+    } else {
+        Write-Warning "Could not parse storage usage from 'mega-df' output. Assuming 0 bytes."
+        Write-Warning "Output was: $output"
+        return 0
+    }
+}
+# --- END HELPER FUNCTION ---
+
+
+Write-Host "Preparing directories..."
 if (-not (Test-Path $downloadDir)) { New-Item -ItemType Directory -Path $downloadDir | Out-Null }
 if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | Out-Null }
 if (-not (Test-Path $accountLogsDir)) { New-Item -ItemType Directory -Path $accountLogsDir | Out-Null }
-if (-not (Test-Path $processedLog)) { New-Item -ItemType File -Path $processedLog | Out-Null }
 
 $password = Get-Content $passwordFile -TotalCount 1
 if ([string]::IsNullOrWhiteSpace($password)) {
@@ -45,8 +79,18 @@ if ([string]::IsNullOrWhiteSpace($password)) {
 }
 
 $accounts = Get-Content $accountsFile
-$processedIds = New-Object System.Collections.Generic.HashSet[string]
-Get-Content $processedLog | ForEach-Object { [void]$processedIds.Add($_) }
+
+# --- UNIFIED PROCESSED FILE TRACKING ---
+Write-Host "Reading existing account logs to determine processed files..."
+$processedFiles = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+$existingLogFiles = Get-ChildItem -Path $accountLogsDir -Filter "*.log"
+foreach ($logFile in $existingLogFiles) {
+    Get-Content $logFile.FullName | Where-Object { -not $_.StartsWith("---") -and -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
+        [void]$processedFiles.Add($_)
+    }
+}
+Write-Host "Found $($processedFiles.Count) previously processed files across all logs."
+# --- END MODIFICATION ---
 
 Write-Host "Fetching file list from Google Drive. This may take a moment..."
 try {
@@ -60,69 +104,34 @@ catch {
 
 Write-Host "Found $($gdriveFiles.Count) total video files. Beginning transfer process..."
 
-# --- RESUME LOGIC ---
-$startIndex = 0
-$resumeAccountName = $null
-$resumeAccountInitialSize = 0
-
-Write-Host "Checking for previous sessions to resume..."
-$lastLog = Get-ChildItem -Path $accountLogsDir -Filter "*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-
-if ($lastLog) {
-    $resumeAccountName = $lastLog.BaseName
-    $foundIndex = [array]::IndexOf($accounts, $resumeAccountName)
-
-    if ($foundIndex -ge 0) {
-        $startIndex = $foundIndex
-        Write-Host "Found previous session. Resuming at account: $resumeAccountName"
-
-        # Pre-calculate the size of files already in the resume account to properly track space.
-        $accountLogFileForResume = Join-Path $accountLogsDir $lastLog.Name
-        if (Test-Path $accountLogFileForResume) {
-            # Create a quick lookup map for file sizes to avoid slow nested loops.
-            $fileSizeMap = @{}
-            $gdriveFiles | ForEach-Object { $fileSizeMap[$_.Path] = [long]$_.Size }
-
-            # Read the log, ignoring the header line, and sum the sizes of already transferred files.
-            Get-Content $accountLogFileForResume | Where-Object { -not $_.StartsWith("---") } | ForEach-Object {
-                if ($fileSizeMap.ContainsKey($_)) {
-                    $resumeAccountInitialSize += $fileSizeMap[$_]
-                }
-            }
-            $usedSpaceGB = [math]::Round($resumeAccountInitialSize / 1GB, 2)
-            Write-Host "Resume account '$resumeAccountName' already contains $usedSpaceGB GB of data."
-        }
-    }
-    else {
-        Write-Warning "Log file for '$resumeAccountName' found, but this account is not in accounts.txt. Starting from the beginning."
-    }
-}
-else {
-    Write-Host "No previous session logs found. Starting fresh."
-}
-# --- END RESUME LOGIC ---
-
-for ($i = $startIndex; $i -lt $accounts.Count; $i++) {
-    $account = $accounts[$i]
+# --- Main processing loop. Iterates through all accounts from the beginning each time. ---
+foreach ($account in $accounts) {
     Write-Host "`n--- Processing account: $account ---"
 
     Write-Host "Ensuring previous session is terminated..."
-    mega-logout
+    mega-logout | Out-Null
 
     Write-Host "Logging in..."
-    mega-login $account $password
+    mega-login $account $password | Out-Null
 
     Start-Sleep -Seconds 2
     
-    Write-Host "Proceeding with file transfer for $account."
-
-    # If this is the account we're resuming, start with its previously calculated size.
-    $currentAccountSize = 0
-    if ($account -eq $resumeAccountName) {
-        $currentAccountSize = $resumeAccountInitialSize
-        # Clear the resume name so this logic only runs for the first account in the session.
-        $resumeAccountName = $null 
+    # --- DYNAMIC STORAGE CHECK ---
+    Write-Host "Getting current storage usage for $account..."
+    $currentAccountSize = Get-MegaUsageBytes
+    if ($null -eq $currentAccountSize) {
+        Write-Error "Could not determine storage for $account. Skipping account."
+        continue
     }
+    $usedSpaceGB = [math]::Round($currentAccountSize / 1GB, 2)
+    Write-Host "Account currently has $usedSpaceGB GB used."
+    
+    # If the account is already full, we can just move on.
+    if ($currentAccountSize -ge $maxSizeBytes) {
+        Write-Host "Account is already full. Moving to the next account."
+        continue
+    }
+    # --- END DYNAMIC STORAGE CHECK ---
     
     $accountLogFile = Join-Path $accountLogsDir "$($account).log"
     if (-not (Test-Path $accountLogFile)) {
@@ -130,19 +139,6 @@ for ($i = $startIndex; $i -lt $accounts.Count; $i++) {
     }
 
     foreach ($file in $gdriveFiles) {
-        if (-not $file -or [string]::IsNullOrWhiteSpace($file.Path)) {
-            Write-Warning "Skipping a malformed or empty file entry from rclone output."
-            continue
-        }
-
-        if ($processedIds.Contains($file.ID)) { continue }
-
-        $fileSize = [long]$file.Size
-        if (($currentAccountSize + $fileSize) -gt $maxSizeBytes) {
-            Write-Host "Account storage limit reached. Moving to the next account."
-            break
-        }
-        
         $fileName = [System.IO.Path]::GetFileName($file.Path)
         
         if ([string]::IsNullOrWhiteSpace($fileName)) {
@@ -150,44 +146,48 @@ for ($i = $startIndex; $i -lt $accounts.Count; $i++) {
             continue
         }
 
+        if ($processedFiles.Contains($fileName)) { continue }
+
+        $fileSize = [long]$file.Size
+        
+        if (($currentAccountSize + $fileSize) -gt $maxSizeBytes) {
+            $requiredGB = [math]::Round(($currentAccountSize + $fileSize) / 1GB, 2)
+            Write-Host "Account storage limit would be reached (Required: $requiredGB GB). Moving to the next account."
+            break
+        }
+        
         $localFilePath = Join-Path $downloadDir $fileName
         $remotePath = "$gdriveRemote$($file.Path)"
 
         Write-Host "Downloading '$fileName' ($([math]::Round($fileSize / 1MB, 2)) MB)..."
         
-        # --- CORRECTION ---
-        # Replaced the unknown flag with one that limits streams to 1, effectively single-threading the download.
         rclone copyto $remotePath $localFilePath --progress --multi-thread-streams 1
-
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Download of '$fileName' failed. Skipping to next file."
             continue
         }
-        # --- END CORRECTION ---
 
         Write-Host "Uploading '$fileName' to $account..."
-        mega-put $localFilePath
-
+        mega-put $localFilePath | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Upload of '$fileName' failed. Halting script to prevent data loss."
-            if (Test-Path $localFilePath) {
-                Remove-Item $localFilePath
-            }
+            if (Test-Path $localFilePath) { Remove-Item $localFilePath }
             exit 1
         }
 
         Write-Host "Cleaning up local file..."
         Remove-Item $localFilePath
 
-        [void]$processedIds.Add($file.ID)
-        Add-Content -Path $processedLog -Value $file.ID
-        Add-Content -Path $accountLogFile -Value $file.Path
+        # --- MODIFIED LOGGING ---
+        [void]$processedFiles.Add($fileName)
+        Add-Content -Path $accountLogFile -Value $fileName
+        
         $currentAccountSize += $fileSize
         $usedSpaceGB = [math]::Round($currentAccountSize / 1GB, 2)
-        Write-Host "File transferred. Current account usage: $usedSpaceGB GB."
+        Write-Host "File transferred. Current account usage estimate: $usedSpaceGB GB."
     }
 }
 
 Write-Host "`n--- All accounts processed. Final logout. ---"
-mega-logout
+mega-logout | Out-Null
 Write-Host "The task is complete."
