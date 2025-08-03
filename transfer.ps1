@@ -9,7 +9,7 @@
 
 .NOTES
     Author: Hiei
-    Last Modified: 2025-08-03 (Removed resume logic per user request)
+    Last Modified: 2025-08-03 (Corrected storage parsing and rclone file listing)
     Requires: rclone, mega-cmd (and to be in the system's PATH).
 #>
 
@@ -41,9 +41,10 @@ function Get-MegaUsageBytes {
         return $null
     }
 
-    # Regex to capture the used storage value and its unit (e.g., "1.16 GB").
-    # It looks for a line containing "used" and captures the preceding number and unit.
-    $match = $output | Select-String -Pattern '(\d+(?:\.\d+)?)\s*(GB|MB|KB|B)\s+used'
+    # --- MODIFICATION ---
+    # Regex to capture the used storage value from the "USED STORAGE:" line.
+    $match = $output | Select-String -Pattern 'USED STORAGE:\s*(\d+(?:\.\d+)?)\s*(GB|MB|KB|B)'
+    # --- END MODIFICATION ---
     if ($match) {
         $value = [double]$match.Matches.Groups[1].Value
         $unit = $match.Matches.Groups[2].Value.ToUpper()
@@ -90,12 +91,14 @@ foreach ($logFile in $existingLogFiles) {
     }
 }
 Write-Host "Found $($processedFiles.Count) previously processed files across all logs."
-# --- END MODIFICATION ---
 
 Write-Host "Fetching file list from Google Drive. This may take a moment..."
 try {
+    # --- MODIFICATION ---
+    # Added --files-only to prevent rclone from listing directories.
     $csvHeader = "Size", "ID", "Path"
-    $gdriveFiles = rclone lsf $gdriveRemote --include "*.{mkv,mp4}" --recursive --format "sip" --separator "," | ConvertFrom-Csv -Header $csvHeader -ErrorAction Stop
+    $gdriveFiles = rclone lsf $gdriveRemote --include "*.{mkv,mp4}" --recursive --files-only --format "sip" --separator "," | ConvertFrom-Csv -Header $csvHeader -ErrorAction Stop
+    # --- END MODIFICATION ---
 }
 catch {
     Write-Error "Failed to get file list from rclone. Is '$gdriveRemote' configured correctly?"
@@ -126,7 +129,6 @@ foreach ($account in $accounts) {
     $usedSpaceGB = [math]::Round($currentAccountSize / 1GB, 2)
     Write-Host "Account currently has $usedSpaceGB GB used."
     
-    # If the account is already full, we can just move on.
     if ($currentAccountSize -ge $maxSizeBytes) {
         Write-Host "Account is already full. Moving to the next account."
         continue
@@ -142,6 +144,7 @@ foreach ($account in $accounts) {
         $fileName = [System.IO.Path]::GetFileName($file.Path)
         
         if ([string]::IsNullOrWhiteSpace($fileName)) {
+            # This should no longer happen with --files-only, but is kept for safety.
             Write-Warning "Could not determine filename for path: $($file.Path). Skipping."
             continue
         }
@@ -178,7 +181,6 @@ foreach ($account in $accounts) {
         Write-Host "Cleaning up local file..."
         Remove-Item $localFilePath
 
-        # --- MODIFIED LOGGING ---
         [void]$processedFiles.Add($fileName)
         Add-Content -Path $accountLogFile -Value $fileName
         
